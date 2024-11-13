@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    /* Table styling */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    th, td {
+      padding: 12px 15px;
+      text-align: center;
+      border: 1px solid #333;
+    }
+    th {
+      background-color: #90EE90; /* Light green color for headers */
+      color: #333;
+      font-weight: bold;
+    }
+    td {
+      color: #333;
+    }
+    input {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      box-sizing: border-box;
+      color: #333;
+    }
+    input.no-border {
+      border: none;
+    }
+    #form-container {
+      margin-bottom: 20px;
+    }
+    .signin-btn {
+      padding: 6px 12px;
+      margin-top: 5px;
+      cursor: pointer;
+      border-radius: 5px;
+      font-size: 14px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      display: inline-block;
+    }
+    .signout-btn {
+      padding: 6px 12px;
+      margin-top: 5px;
+      cursor: pointer;
+      border-radius: 5px;
+      font-size: 14px;
+      background-color: #f44336;
+      color: white;
+      border: none;
+      display: inline-block;
+    }
+    .signout-btn[disabled] {
+      background-color: #ccc;
+      cursor: not-allowed;
+    }
+    .editable-cell {
+      cursor: pointer;
+    }
+    #filter-container {
+      margin-bottom: 20px;
+      width: 100%;
+    }
+    #filter-input {
+      width: 100%;
+      padding: 10px;
+      font-size: 14px;
+      border: 1px solid #ddd;
+      margin-bottom: 10px;
+      box-sizing: border-box;
+    }
+    /* Banner notification style */
+    #notification-banner {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      background-color: #4CAF50;
+      color: white;
+      padding: 10px;
+      text-align: center;
+      font-size: 16px;
+      display: none;
+      z-index: 1000;
+      opacity: 0;
+      transition: opacity 0.5s ease-in-out;
+    }
+  </style>
+</head>
+<body>
+  <h2>Attendance Data</h2>
+
+  <!-- Form to enter fname, lname, and Sign In Person button -->
+  <div id="form-container">
+    <input type="text" id="fname" placeholder="First Name" required />
+    <input type="text" id="lname" placeholder="Last Name" required />
+    <button onclick="signInPerson()">Sign In Person</button>
+  </div>
+
+  <!-- Banner Notification for Success Message -->
+  <div id="notification-banner"></div>
+
+  <!-- Filter input above the table -->
+  <div id="filter-container">
+    <input type="text" id="filter-input" placeholder="Search by name, group, or stand..." oninput="debouncedFilterTable()" />
+  </div>
+
+  <!-- Table to display data -->
+  <table id="attendanceTable">
+    <thead>
+      <tr>
+        <th>First Name</th>
+        <th>Last Name</th>
+        <th>Group Name</th>
+        <th>Stand Number</th>
+        <th>Sign In</th>
+        <th>Sign Out</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      <!-- Data rows will be populated here -->
+    </tbody>
+  </table>
+
+  <script>
+    let currentData = []; // Store fetched data for filtering purposes
+    let debounceTimeout = null; // For debouncing the filter input
+
+    // Fetch existing data and render it
+    function fetchData() {
+      google.script.run.withSuccessHandler(renderTable).getData();
+    }
+
+    // Render table dynamically with existing data
+    function renderTable(data) {
+      currentData = data; // Save data for filtering
+      filterTable(); // Apply filter when data is rendered
+
+      const tableBody = document.querySelector('#attendanceTable tbody');
+      tableBody.innerHTML = '';  // Clear existing rows
+
+      // Create a document fragment for faster DOM updates
+      const fragment = document.createDocumentFragment();
+
+      // Loop through all rows in the data and populate the table
+      data.forEach(function(row, index) {
+        const tr = document.createElement('tr');
+
+        // Loop through columns and create the table rows
+        row.forEach(function(cell, colIndex) {
+          const td = document.createElement('td');
+
+          // For "Group Name" and "Stand Number", create an input field
+          if (colIndex === 2 || colIndex === 3) {
+            const input = document.createElement('input');
+            input.value = cell;
+            input.classList.add('editable-cell'); // Add a class for styling
+            input.dataset.row = index;
+            input.dataset.col = colIndex;
+
+            input.addEventListener('focus', function() {
+              this.classList.remove('no-border');
+            });
+
+            input.addEventListener('blur', function() {
+              updateData(index, colIndex, input.value); // Update the sheet with new value
+              if (input.value) {
+                this.classList.add('no-border');
+              }
+            });
+
+            td.appendChild(input); // Append input for editable cells
+          } else {
+            td.textContent = cell; // Static cells (non-editable)
+          }
+
+          tr.appendChild(td);
+        });
+
+        // Add Sign In and Sign Out buttons
+        addSignInSignOutButtons(row, tr, index);
+
+        // Append the row to the fragment
+        fragment.appendChild(tr);
+      });
+
+      // Append the fragment to the table body in one go
+      tableBody.appendChild(fragment);
+    }
+
+    // Function to add Sign In and Sign Out buttons dynamically
+    function addSignInSignOutButtons(row, tr, index) {
+      const tdSignIn = tr.cells[4]; // The Sign In column
+      const signInBtn = document.createElement('button');
+      signInBtn.classList.add('signin-btn');
+      signInBtn.textContent = 'Sign In';
+      signInBtn.dataset.row = index;
+
+      if (row[4]) {
+        signInBtn.style.display = 'none';
+      } else {
+        signInBtn.style.display = 'inline-block';
+        signInBtn.onclick = function() {
+          signInButtonClick(index);
+        };
+      }
+      tdSignIn.appendChild(signInBtn);
+
+      const tdSignOut = tr.cells[5]; // The Sign Out column
+      const signOutBtn = document.createElement('button');
+      signOutBtn.classList.add('signout-btn');
+      signOutBtn.textContent = 'Sign Out';
+      signOutBtn.dataset.row = index;
+
+      // Show the Sign Out button only if the user is signed in but not signed out yet
+      if (row[4] && !row[5]) {
+        signOutBtn.style.display = 'inline-block';
+        signOutBtn.onclick = function() {
+          signOutButtonClick(index, tr, signOutBtn); // Pass row and button to hide immediately
+        };
+      } else {
+        signOutBtn.style.display = 'none';  // Hide the button after sign-out
+      }
+      tdSignOut.appendChild(signOutBtn);
+    }
+
+    // Function to sign in a person and update the Google Sheet
+    function signInButtonClick(row) {
+      const firstName = currentData[row][0];
+      const lastName = currentData[row][1];
+      google.script.run.withSuccessHandler(function(response) {
+        showNotification(`${firstName} ${lastName} has successfully signed in!`);
+        fetchData(); // Refresh data after sign-in
+      }).signIn(row);
+    }
+
+    // Function to sign out a person and update the Google Sheet
+    function signOutButtonClick(row, tr, signOutBtn) {
+      const firstName = currentData[row][0];
+      const lastName = currentData[row][1];
+
+      // Immediately hide the Sign Out button
+      signOutBtn.style.display = 'none';
+
+      // Update the Sign Out time immediately in the table (in the DOM)
+      const currentTime = new Date().toLocaleTimeString();
+      tr.cells[5].textContent = currentTime;
+
+      // Call the server to update the sheet asynchronously
+      google.script.run.withSuccessHandler(function(response) {
+        showNotification(`${firstName} ${lastName} has successfully signed out!`);
+      }).signOut(row);
+    }
+
+    // Function to show a notification banner
+    function showNotification(message) {
+      const banner = document.getElementById('notification-banner');
+      banner.textContent = message;
+      banner.style.display = 'block';
+      banner.style.opacity = 1;
+      setTimeout(function() {
+        banner.style.opacity = 0;
+        setTimeout(function() {
+          banner.style.display = 'none';
+        }, 500);
+      }, 3000);
+    }
+
+    // Function to add new entry to Google Sheets (sign-in person)
+    function signInPerson() {
+      const fname = document.getElementById('fname').value;
+      const lname = document.getElementById('lname').value;
+
+      if (fname && lname) {
+        google.script.run.addEntryToSheet(fname, lname);
+        showNotification(`${fname} ${lname} has been added to the attendance sheet!`);
+        document.getElementById('fname').value = '';
+        document.getElementById('lname').value = '';
+        setTimeout(fetchData, 1000); // Refresh data after adding new entry
+      } else {
+        alert('Please enter both first name and last name.');
+      }
+    }
+
+    // Debounced version of filterTable
+    function debouncedFilterTable() {
+      clearTimeout(debounceTimeout);
+      debounceTimeout = setTimeout(filterTable, 300); // Delay by 300ms to prevent rapid firing
+    }
+
+    // Filter table rows based on input
+    function filterTable() {
+      const filter = document.getElementById('filter-input').value.toLowerCase();
+      const rows = document.querySelectorAll('#attendanceTable tbody tr');
+
+      rows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        const match = Array.from(cells).some(cell => cell.textContent.toLowerCase().includes(filter));
+        row.style.display = match ? '' : 'none';
+      });
+    }
+
+    // Load data when the page loads
+    window.onload = function() {
+      fetchData();
+    };
+
+    // Reload the table data every 1 second
+    setInterval(fetchData, 1000); // 1000 milliseconds = 1 second
+  </script>
+</body>
+</html>
